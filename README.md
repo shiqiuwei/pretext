@@ -36,9 +36,15 @@ const { height, lineCount } = layout(block, containerWidth)
 
 ## Accuracy
 
-99.4% match against browser DOM ground truth across 2 fonts × 8 sizes × 8 widths × 30 texts (3840 tests). Remaining mismatches are emoji only (canvas measures emoji 4px wider than DOM at font sizes <24px on macOS — a browser pipeline difference with Apple Color Emoji).
+Tested across 2 fonts × 8 sizes × 8 widths × 30 i18n texts (3840 tests):
 
-100% match in headless tests (HarfBuzz vs full-line measurement, 1472 tests).
+| Browser | Match rate | Remaining mismatches |
+|---|---|---|
+| Chrome | 99.4% | Emoji canvas width inflation (browser bug) |
+| Safari | 98.8% | CSS line-breaking rule differences (emoji breaks, CJK kinsoku, bidi) |
+| Headless (HarfBuzz) | 100% | Algorithm is exact |
+
+Chrome's emoji mismatches are a [browser bug](chromium-bug/issue.md) — canvas `measureText` returns inflated widths for emoji at small font sizes. Safari's mismatches are CSS line-breaking behavior differences (not measurement errors). See [RESEARCH.md](RESEARCH.md) for details.
 
 ## i18n
 
