@@ -81,21 +81,32 @@ export function countPreparedLines(prepared: PreparedLineBreakData, maxWidth: nu
   let lineW = 0
   let hasContent = false
 
+  function appendBreakableSegmentCounting(segmentIndex: number): void {
+    const gWidths = breakableWidths[segmentIndex]!
+
+    for (let g = 0; g < gWidths.length; g++) {
+      const gw = gWidths[g]!
+
+      if (!hasContent) {
+        lineW = gw
+        lineCount++
+        hasContent = true
+        continue
+      }
+
+      if (lineW + gw > maxWidth + lineFitEpsilon) {
+        lineCount++
+        lineW = gw
+      } else {
+        lineW += gw
+      }
+    }
+  }
+
   function placeOnFreshLine(segmentIndex: number): void {
     const w = widths[segmentIndex]!
     if (w > maxWidth && breakableWidths[segmentIndex] !== null) {
-      const gWidths = breakableWidths[segmentIndex]!
-      lineW = 0
-      for (let g = 0; g < gWidths.length; g++) {
-        const gw = gWidths[g]!
-        if (lineW > 0 && lineW + gw > maxWidth + lineFitEpsilon) {
-          lineCount++
-          lineW = gw
-        } else {
-          if (lineW === 0) lineCount++
-          lineW += gw
-        }
-      }
+      appendBreakableSegmentCounting(segmentIndex)
     } else {
       lineW = w
       lineCount++
@@ -118,9 +129,14 @@ export function countPreparedLines(prepared: PreparedLineBreakData, maxWidth: nu
       if (isCollapsibleSpaceKind(kind)) {
         continue
       }
-      lineW = 0
-      hasContent = false
-      placeOnFreshLine(i)
+
+      if (w > maxWidth && breakableWidths[i] !== null) {
+        appendBreakableSegmentCounting(i)
+      } else {
+        lineW = 0
+        hasContent = false
+        placeOnFreshLine(i)
+      }
     } else {
       lineW = newW
     }
@@ -314,7 +330,6 @@ export function walkPreparedLines(
       }
 
       if (w > maxWidth && breakableWidths[i] !== null) {
-        emitCurrentLine()
         appendBreakableSegment(i)
       } else {
         emitCurrentLine()
@@ -499,6 +514,11 @@ export function layoutNextLineRange(
 
       const softBreakLine = maybeFinishAtSoftHyphen(i)
       if (softBreakLine !== null) return softBreakLine
+
+      if (w > maxWidth && breakableWidths[i] !== null) {
+        const line = appendBreakableSegmentFrom(i, 0)
+        if (line !== null) return line
+      }
 
       return finishLine()
     }

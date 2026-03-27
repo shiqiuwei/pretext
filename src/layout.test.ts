@@ -423,6 +423,20 @@ describe('layout invariants', () => {
     expect(actual).toEqual(expected.lines)
   })
 
+  test('overlong breakable segments can fill the remaining line before wrapping', () => {
+    const prepared = prepareWithSegments('foo abcdefghijk', FONT)
+    const prefixWidth = prepared.widths[0]! + prepared.widths[1]!
+    const wordBreaks = prepared.breakableWidths[2]!
+    const width = prefixWidth + wordBreaks[0]! + wordBreaks[1]! + 0.1
+
+    const batched = layoutWithLines(prepared, width, LINE_HEIGHT)
+    expect(batched.lines[0]?.text).toBe('foo ab')
+
+    const streamed = layoutNextLine(prepared, { segmentIndex: 0, graphemeIndex: 0 }, width)
+    expect(streamed?.text).toBe('foo ab')
+    expect(layout(prepared, width, LINE_HEIGHT).lineCount).toBe(batched.lineCount)
+  })
+
   test('walkLineRanges reproduces layoutWithLines geometry without materializing text', () => {
     const prepared = prepareWithSegments('foo trans\u00ADatlantic said "hello" to 世界 and waved.', FONT)
     const width = prepared.widths[0]! + prepared.widths[1]! + prepared.widths[2]! + prepared.breakableWidths[4]![0]! + prepared.discretionaryHyphenWidth + 0.1
