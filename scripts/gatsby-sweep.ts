@@ -5,9 +5,9 @@ import {
   createBrowserSession,
   ensurePageServer,
   getAvailablePort,
-  loadHashReport,
   type BrowserKind,
 } from './browser-automation.ts'
+import { startPostedReportServer } from './report-server.ts'
 
 type GatsbyLineMismatch = {
   line: number
@@ -24,8 +24,6 @@ type GatsbyNavigationBreakMismatch = {
 }
 
 type GatsbyNavigationReport = {
-  status: 'ready' | 'error'
-  requestId?: string
   width?: number
   predictedHeight?: number
   actualHeight?: number
@@ -35,6 +33,14 @@ type GatsbyNavigationReport = {
   mismatchCount?: number
   firstMismatch?: GatsbyLineMismatch | null
   firstBreakMismatch?: GatsbyNavigationBreakMismatch | null
+}
+
+type GatsbySweepReport = {
+  status: 'ready' | 'error'
+  requestId?: string
+  widthCount?: number
+  exactCount?: number
+  rows?: GatsbyNavigationReport[]
   message?: string
 }
 
@@ -227,50 +233,62 @@ try {
   const pageServer = await ensurePageServer(options.port, '/gatsby', process.cwd())
   serverProcess = pageServer.process
   const baseUrl = `${pageServer.baseUrl}/gatsby`
-  const mismatches: SweepMismatch[] = []
   const widths = getTargetWidths(options)
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const reportServer = await startPostedReportServer<GatsbySweepReport>(requestId)
+  const url =
+    `${baseUrl}?report=1&diagnostic=light` +
+    `&widths=${encodeURIComponent(widths.join(','))}` +
+    `&requestId=${requestId}` +
+    `&reportEndpoint=${encodeURIComponent(reportServer.endpoint)}`
 
-  for (let index = 0; index < widths.length; index++) {
-    const width = widths[index]!
-    const requestId = `${Date.now()}-${width}-${Math.random().toString(36).slice(2, 8)}`
-    const url = `${baseUrl}?report=1&diagnostic=light&width=${width}&requestId=${requestId}`
-    const report = await loadHashReport<GatsbyNavigationReport>(session, url, requestId, options.browser)
-
-    if (report.status === 'error') {
-      throw new Error(report.message ?? `Gatsby report failed at width ${width}`)
+  const report = await (async () => {
+    try {
+      await session.navigate(url)
+      return await reportServer.waitForReport()
+    } finally {
+      reportServer.close()
     }
+  })()
 
-    const diffPx = report.diffPx ?? 0
-    if (diffPx !== 0) {
-      mismatches.push({
-        width: report.width ?? width,
-        diffPx,
-        predictedHeight: report.predictedHeight ?? 0,
-        actualHeight: report.actualHeight ?? 0,
-        predictedLineCount: report.predictedLineCount ?? null,
-        browserLineCount: report.browserLineCount ?? null,
-        mismatchCount: report.mismatchCount ?? null,
-        firstBreakMismatch: report.firstBreakMismatch ?? null,
-        firstMismatch: report.firstMismatch ?? null,
-      })
-
-      console.log(
-        `${width}px -> ${formatSignedInt(diffPx)}px | ${report.predictedHeight ?? 0}/${report.actualHeight ?? 0}${report.firstBreakMismatch?.reasonGuess ? ` | ${report.firstBreakMismatch.reasonGuess}` : ''}`,
-      )
-    }
-
-    if ((index + 1) % 50 === 0 || index === widths.length - 1) {
-      console.log(`progress ${index + 1}/${widths.length}`)
-    }
+  if (report.status === 'error') {
+    throw new Error(report.message ?? 'Gatsby sweep failed')
   }
+  if (report.rows === undefined) {
+    throw new Error('Gatsby sweep report was missing rows')
+  }
+
+  const mismatches: SweepMismatch[] = []
+  for (const row of report.rows) {
+    const diffPx = row.diffPx ?? 0
+    if (diffPx === 0) continue
+
+    mismatches.push({
+      width: row.width ?? 0,
+      diffPx,
+      predictedHeight: row.predictedHeight ?? 0,
+      actualHeight: row.actualHeight ?? 0,
+      predictedLineCount: row.predictedLineCount ?? null,
+      browserLineCount: row.browserLineCount ?? null,
+      mismatchCount: row.mismatchCount ?? null,
+      firstBreakMismatch: row.firstBreakMismatch ?? null,
+      firstMismatch: row.firstMismatch ?? null,
+    })
+
+    console.log(
+      `${row.width ?? 0}px -> ${formatSignedInt(diffPx)}px | ${row.predictedHeight ?? 0}/${row.actualHeight ?? 0}${row.firstBreakMismatch?.reasonGuess ? ` | ${row.firstBreakMismatch.reasonGuess}` : ''}`,
+    )
+  }
+
+  console.log(`progress ${report.rows.length}/${report.rows.length}`)
 
   const summary: SweepSummary = {
     browser: options.browser,
     start: options.start,
     end: options.end,
     step: options.step,
-    widthCount: widths.length,
-    exactCount: widths.length - mismatches.length,
+    widthCount: report.widthCount ?? report.rows.length,
+    exactCount: report.exactCount ?? (report.rows.length - mismatches.length),
     mismatches,
   }
 
